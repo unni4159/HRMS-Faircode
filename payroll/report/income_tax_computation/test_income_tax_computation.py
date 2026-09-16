@@ -1,0 +1,211 @@
+import frappe
+from frappe.utils import add_days, getdate
+
+from erpnext.setup.doctype.employee.test_employee import make_employee
+
+from hrms.payroll.doctype.employee_tax_exemption_declaration.test_employee_tax_exemption_declaration import (
+	create_payroll_period,
+)
+from hrms.payroll.doctype.salary_slip.test_salary_slip import (
+	create_exemption_declaration,
+	create_salary_slips_for_payroll_period,
+	create_tax_slab,
+)
+from hrms.payroll.doctype.salary_structure.test_salary_structure import make_salary_structure
+from hrms.payroll.report.income_tax_computation.income_tax_computation import execute
+from hrms.tests.utils import HRMSTestSuite
+
+
+class TestIncomeTaxComputation(HRMSTestSuite):
+	def setUp(self):
+		self.cleanup_records()
+		self.create_records()
+
+	def cleanup_records(self):
+		frappe.qb.from_("Employee Tax Exemption Declaration").delete().run()
+		frappe.qb.from_("Payroll Period").delete().run()
+		frappe.qb.from_("Income Tax Slab").delete().run()
+		frappe.qb.from_("Salary Component").delete().run()
+		frappe.qb.from_("Employee Benefit Application").delete().run()
+		frappe.qb.from_("Employee Benefit Claim").delete().run()
+		employee = frappe.qb.DocType("Employee")
+		frappe.qb.from_(employee).delete().where(employee.company == "_Test Company").run()
+		frappe.qb.from_("Salary Slip").delete().run()
+
+	def create_records(self):
+		self.employee = make_employee(
+			"employee_tax_computation@example.com",
+			company="_Test Company",
+			date_of_joining=getdate("01-10-2021"),
+		)
+
+		self.payroll_period = create_payroll_period(name="_Test Payroll Period 1", company="_Test Company")
+
+		self.income_tax_slab = create_tax_slab(
+			self.payroll_period,
+			allow_tax_exemption=True,
+			effective_date=getdate("2019-04-01"),
+			company="_Test Company",
+		)
+		salary_structure = make_salary_structure(
+			"Monthly Salary Structure Test Income Tax Computation",
+			"Monthly",
+			employee=self.employee,
+			company="_Test Company",
+			currency="INR",
+			payroll_period=self.payroll_period,
+			test_tax=True,
+		)
+
+		create_exemption_declaration(self.employee, self.payroll_period.name)
+
+		create_salary_slips_for_payroll_period(
+			self.employee, salary_structure.name, self.payroll_period, deduct_random=False, num=3
+		)
+
+	def test_report(self):
+		filters = frappe._dict(
+			{
+				"company": "_Test Company",
+				"payroll_period": self.payroll_period.name,
+				"employee": self.employee,
+			}
+		)
+
+		result = execute(filters)
+
+		expected_data = {
+			"employee": self.employee,
+			"employee_name": "employee_tax_computation@example.com",
+			"department": "All Departments",
+			"income_tax_slab": self.income_tax_slab,
+			"gross_earnings": 936000.0,
+			"professional_tax": 2400.0,
+			"standard_tax_exemption": 50000,
+			"total_exemption": 52400.0,
+			"total_taxable_amount": 883600.0,
+			"applicable_tax": 92789.0,
+			"total_tax_deducted": 17997.0,
+			"payable_tax": 74792.0,
+		}
+
+		for key, val in expected_data.items():
+			self.assertEqual(result[1][0].get(key), val)
+
+		# Run report considering tax exemption declaration
+		filters.consider_tax_exemption_declaration = 1
+
+		result = execute(filters)
+
+		expected_data.update(
+			{
+				"_test_category": 100000.0,
+				"total_exemption": 152400.0,
+				"total_taxable_amount": 783600.0,
+				"applicable_tax": 71989.0,
+				"payable_tax": 53992.0,
+			}
+		)
+
+		for key, val in expected_data.items():
+			self.assertEqual(result[1][0].get(key), val)
+
+	def test_employee_joined_after_payroll_period_is_excluded(self):
+		# employee joins after the payroll period ends -> employment does not overlap
+		# the period, so they must be excluded from the report (and not crash it while
+		# trying to build a salary slip with no applicable salary structure)
+		joining_date = add_days(self.payroll_period.end_date, 90)
+		employee = make_employee(
+			"joined_after_period@example.com",
+			company="_Test Company",
+			date_of_joining=joining_date,
+		)
+		make_salary_structure(
+			"Monthly Salary Structure Joined After Period",
+			"Monthly",
+			employee=employee,
+			company="_Test Company",
+			currency="INR",
+			from_date=joining_date,
+			payroll_period=self.payroll_period,
+			test_tax=True,
+		)
+
+		filters = frappe._dict(
+			{
+				"company": "_Test Company",
+				"payroll_period": self.payroll_period.name,
+			}
+		)
+		result = execute(filters)[1]
+
+		employees_in_report = [row.get("employee") for row in result]
+		self.assertNotIn(employee, employees_in_report)
+
+	def test_employee_relieved_before_payroll_period_is_excluded(self):
+		# employee relieved before the payroll period starts -> employment does not
+		# overlap the period, so they must be excluded from the report
+		joining_date = add_days(self.payroll_period.start_date, -400)
+		relieving_date = add_days(self.payroll_period.start_date, -1)
+		employee = make_employee(
+			"relieved_before_period@example.com",
+			company="_Test Company",
+			date_of_joining=joining_date,
+		)
+		make_salary_structure(
+			"Monthly Salary Structure Relieved Before Period",
+			"Monthly",
+			employee=employee,
+			company="_Test Company",
+			currency="INR",
+			from_date=joining_date,
+			payroll_period=self.payroll_period,
+			test_tax=True,
+		)
+		frappe.db.set_value("Employee", employee, {"relieving_date": relieving_date, "status": "Left"})
+
+		filters = frappe._dict(
+			{
+				"company": "_Test Company",
+				"payroll_period": self.payroll_period.name,
+			}
+		)
+		result = execute(filters)[1]
+
+		employees_in_report = [row.get("employee") for row in result]
+		self.assertNotIn(employee, employees_in_report)
+
+	def test_get_report_for_all_employees(self):
+		frappe.db.delete("Employee")
+		users = [
+			{"email": "test_itrc1@example.com", "args": {"status": "Active"}},
+			{"email": "test_itrc2@example.com", "args": {"status": "Inactive"}},
+			{"email": "test_itrc3@example.com", "args": {"status": "Suspended"}},
+			{"email": "test_itrc4@example.com", "args": {"status": "Left", "relieving_date": getdate()}},
+		]
+
+		for user in users:
+			employee = make_employee(user["email"], company="_Test Company")
+			salary_structure = make_salary_structure(
+				"Monthly Salary Structure Test Income Tax Computation",
+				"Monthly",
+				employee=employee,
+				company="_Test Company",
+				currency="INR",
+				payroll_period=self.payroll_period,
+				test_tax=True,
+			)
+
+			create_salary_slips_for_payroll_period(
+				employee, salary_structure.name, self.payroll_period, deduct_random=False, num=3
+			)
+			frappe.db.set_value("Employee", employee, user["args"])
+
+		filters = frappe._dict(
+			{
+				"company": "_Test Company",
+				"payroll_period": self.payroll_period.name,
+			}
+		)
+		result = execute(filters)[1]
+		self.assertEqual(len(result), 4)
