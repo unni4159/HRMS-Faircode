@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "creation": "2026-09-13 11:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "stage",
+  "status",
+  "result",
+  "scheduled_on",
+  "interviewer",
+  "call_url",
+  "completed_on",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "stage",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Interview Stage",
+   "options": "Interview 1\nInterview 2\nHR Round"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Pending\nScheduled\nCompleted\nCancelled"
+  },
+  {
+   "fieldname": "result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Result",
+   "options": "Pending\nSelected\nRejected"
+  },
+  {
+   "fieldname": "scheduled_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Scheduled On"
+  },
+  {
+   "fieldname": "interviewer",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Interviewer"
+  },
+  {
+   "default": "https://meet.google.com/home",
+   "fieldname": "call_url",
+   "fieldtype": "Data",
+   "label": "Call URL"
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "Completed On"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-13 11:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "HR",
+ "name": "Candidate Interview Log",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
+
