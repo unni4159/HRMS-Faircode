@@ -1,2 +1,0 @@
-# Candidate DocType package
-
